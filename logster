@@ -121,12 +121,12 @@ else:
 
 
     # Logging infrastructure for use throughout the script.
-    # Uses appending log file, rotated at 100 MB, keeping 5.
+    # Uses appending log file, rotated at 10 MB, keeping 5.
     if (not os.path.isdir(log_dir)):
         os.mkdir(log_dir)
     logger = logging.getLogger('logster')
     formatter = logging.Formatter('%(asctime)s %(levelname)-8s %(message)s')
-    hdlr = logging.handlers.RotatingFileHandler('%s/logster.log' % log_dir, 'a', 100 * 1024 * 1024, 5)
+    hdlr = logging.handlers.RotatingFileHandler('%s/logster.log' % log_dir, 'a', 10 * 1024 * 1024, 5)
     hdlr.setFormatter(formatter)
     logger.addHandler(hdlr)
     logger.setLevel(logging.INFO)
