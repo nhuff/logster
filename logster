@@ -56,12 +56,13 @@ from math import floor
 
 # Local dependencies
 sys.path.append("/usr/share/logster")
+sys.path.append("parsers")
 from logster_helper import LogsterParsingException, LockingError
 
 # Globals
 gmetric = "/usr/bin/gmetric"
 logtail = "/usr/sbin/logtail2"
-log_dir = "/var/log/logster"
+log_dir = "./log"
 state_dir = "/var/run"
 
 script_start_time = time()
@@ -84,45 +85,54 @@ cmdline.add_option('--graphite-host', action='store',
 cmdline.add_option('--state-dir', '-s', action='store', default=state_dir,
                     help='Where to store the logtail state file.  Default location %s' % state_dir)
 cmdline.add_option('--output', '-o', action='append',
-                   choices=('graphite', 'ganglia', 'stdout'),
+                   choices=('graphite', 'ganglia', 'stdout','munin'),
                    help="Where to send metrics (can specify multiple times). Choices are 'graphite', 'ganglia', or 'stdout'.")
 cmdline.add_option('--dry-run', '-d', action='store_true', default=False,
                     help='Parse the log file but send stats to standard output.')
 cmdline.add_option('--debug', '-D', action='store_true', default=False,
                     help='Provide more verbose logging for debugging.')
+cmdline.add_option('--munin-config', action='store_true', default=False,
+                    help='Have parse output a munin config')
 options, arguments = cmdline.parse_args()
 
 if options.parser_help:
     options.parser_options = '-h'
 
-if (len(arguments) != 2):
-    cmdline.print_help()
-    cmdline.error("Supply at least two arguments: parser and logfile.")
-if not options.output:
-    cmdline.print_help()
-    cmdline.error("Supply where the data should be sent with -o (or --output).")
-if 'graphite' in options.output and not options.graphite_host:
-    cmdline.print_help()
-    cmdline.error("You must supply --graphite-host when using 'graphite' as an output type.")
+if (options.munin_config):
+    if(len(arguments) != 1):
+        cmdline.print_help()
+        cmdline.error("munin_config expects 1 argument, the parser.")
 
-class_name = arguments[0]
-log_file   = arguments[1]
-state_dir  = options.state_dir
+    class_name = arguments[0]
+else:
+    if (len(arguments) != 2):
+        cmdline.print_help()
+        cmdline.error("Supply at least two arguments: parser and logfile.")
+    if not options.output:
+        cmdline.print_help()
+        cmdline.error("Supply where the data should be sent with -o (or --output).")
+    if 'graphite' in options.output and not options.graphite_host:
+        cmdline.print_help()
+        cmdline.error("You must supply --graphite-host when using 'graphite' as an output type.")
+
+    class_name = arguments[0]
+    log_file   = arguments[1]
+    state_dir  = options.state_dir
 
 
-# Logging infrastructure for use throughout the script.
-# Uses appending log file, rotated at 100 MB, keeping 5.
-if (not os.path.isdir(log_dir)):
-    os.mkdir(log_dir)
-logger = logging.getLogger('logster')
-formatter = logging.Formatter('%(asctime)s %(levelname)-8s %(message)s')
-hdlr = logging.handlers.RotatingFileHandler('%s/logster.log' % log_dir, 'a', 100 * 1024 * 1024, 5)
-hdlr.setFormatter(formatter)
-logger.addHandler(hdlr)
-logger.setLevel(logging.INFO)
+    # Logging infrastructure for use throughout the script.
+    # Uses appending log file, rotated at 100 MB, keeping 5.
+    if (not os.path.isdir(log_dir)):
+        os.mkdir(log_dir)
+    logger = logging.getLogger('logster')
+    formatter = logging.Formatter('%(asctime)s %(levelname)-8s %(message)s')
+    hdlr = logging.handlers.RotatingFileHandler('%s/logster.log' % log_dir, 'a', 100 * 1024 * 1024, 5)
+    hdlr.setFormatter(formatter)
+    logger.addHandler(hdlr)
+    logger.setLevel(logging.INFO)
 
-if (options.debug):
-    logger.setLevel(logging.DEBUG)
+    if (options.debug):
+        logger.setLevel(logging.DEBUG)
 
 
 ## This provides a lineno() function to make it easy to grab the line
@@ -144,6 +154,8 @@ def submit_stats(parser, duration, options):
         submit_graphite(metrics, options)
     if 'stdout' in options.output:
         submit_stdout(metrics, options)
+    if 'munin' in options.output:
+        submit_munin(metrics,options)
 
 def submit_stdout(metrics, options):
     for metric in metrics:
@@ -192,6 +204,12 @@ def submit_graphite(metrics, options):
     if (not options.dry_run):
         s.close()
 
+def submit_munin(metrics,options):
+    for metric in metrics:
+        if (options.metric_prefix != ""):
+            metric.name = options.metric_prefix+'_'+metric.name
+
+        print "%s.value %s"%(metric.name,metric.value)
 
 def start_locking(lockfile_name):
     """ Acquire a lock via a provided lockfile filename. """
@@ -230,13 +248,6 @@ def end_locking(lockfile_fd, lockfile_name):
 
 def main():
 
-    dirsafe_logfile = log_file.replace('/','-')
-    logtail_state_file = '%s/logtail-%s%s.state' % (state_dir, class_name, dirsafe_logfile)
-    logtail_lock_file  = '%s/logtail-%s%s.lock' % (state_dir, class_name, dirsafe_logfile)
-    shell_tail = "%s -f %s -o %s" % (logtail, log_file, logtail_state_file)
-
-    logger.info("Executing parser %s on logfile %s" % (class_name, log_file))
-    logger.debug("Using state file %s" % logtail_state_file)
 
     # Import and instantiate the class from the module passed in.  Files and Class names must be the same.
     try:
@@ -245,6 +256,18 @@ def main():
     except Exception, e:
         print "Failed to instantiate parser (line %s): %s" % (lineno(), e)
         sys.exit(1)
+
+    if (options.munin_config):
+        parser.munin_config(options.metric_prefix)
+        sys.exit(0)
+
+    dirsafe_logfile = log_file.replace('/','-')
+    logtail_state_file = '%s/logtail-%s%s.state' % (state_dir, class_name, dirsafe_logfile)
+    logtail_lock_file  = '%s/logtail-%s%s.lock' % (state_dir, class_name, dirsafe_logfile)
+    shell_tail = "%s -f %s -o %s" % (logtail, log_file, logtail_state_file)
+
+    logger.info("Executing parser %s on logfile %s" % (class_name, log_file))
+    logger.debug("Using state file %s" % logtail_state_file)
 
     # Check for lock file so we don't run multiple copies of the same parser 
     # simultaneuosly. This will happen if the log parsing takes more time than

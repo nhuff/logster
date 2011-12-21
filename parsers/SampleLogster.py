@@ -44,7 +44,6 @@ class SampleLogster(LogsterParser):
         # fields from the line (in this case, http_status_code).
         self.reg = re.compile('.*HTTP/1.\d\" (?P<http_status_code>\d{3}) .*')
 
-
     def parse_line(self, line):
         '''This function should digest the contents of one line at a time, updating
         object's state variables. Takes a single argument, the line to be parsed.'''
@@ -88,3 +87,15 @@ class SampleLogster(LogsterParser):
             MetricObject("http_4xx", (self.http_4xx / self.duration), "Responses per sec"),
             MetricObject("http_5xx", (self.http_5xx / self.duration), "Responses per sec"),
         ]
+
+    def munin_config(self,prefix):
+        if (prefix != ''):
+            prefix = prefix+'_'
+
+        print "graph_title %sHttp Response Status"%(prefix,)
+        print "graph_vlabel Req/Sec"
+        print "http_1xx.label 1xx" 
+        print "http_2xx.label 2xx" 
+        print "http_3xx.label 3xx" 
+        print "http_4xx.label 4xx" 
+        print "http_5xx.label 5xx" 
